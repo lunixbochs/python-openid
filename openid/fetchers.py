@@ -29,6 +29,12 @@ try:
 except ImportError:
     pycurl = None
 
+# try to import requests, which will let us use RequestsHTTPFetcher
+try:
+    import requests
+except ImportError:
+    requests = None
+
 USER_AGENT = "python-openid/%s (%s)" % (openid.__version__, sys.platform)
 MAX_RESPONSE_KB = 1024
 
@@ -44,11 +50,13 @@ def fetch(url, body=None, headers=None):
 def createHTTPFetcher():
     """Create a default HTTP fetcher instance
 
-    prefers Curl to urllib2."""
-    if pycurl is None:
-        fetcher = Urllib2Fetcher()
-    else:
+    prefers requests to Curl to urllib2."""
+    if requests is not None:
+        fetcher = RequestsHTTPFetcher()
+    elif pycurl is not None:
         fetcher = CurlHTTPFetcher()
+    else:
+        fetcher = Urllib2Fetcher()
 
     return fetcher
 
@@ -234,6 +242,37 @@ class HTTPError(HTTPFetchingError):
     encounters an exceptional situation fetching a URL.
     """
     pass
+
+class RequestsHTTPFetcher(HTTPFetcher):
+    """
+    An C{L{HTTPFetcher}} that uses requests for fetching.
+    See U{https://github.com/kennethreitz/requests}.
+    """
+
+    get = staticmethod(requests.get)
+    post = staticmethod(requests.post)
+
+    def fetch(self, url, body=None, headers=None):
+        if not _allowedURL(url):
+            raise ValueError('Bad URL scheme: %r' % (url,))
+
+        if headers is None:
+            headers = {}
+
+        if body is not None:
+            response = self.post(url, data=body, headers=headers)
+        else:
+            response = self.get(url, headers=headers)
+
+        return self._makeResponse(response)
+
+    def _makeResponse(self, response):
+        resp = HTTPResponse()
+        resp.body = response.text.decode(response.encoding).encode('utf8')
+        resp.final_url = response.url
+        resp.headers = response.headers
+        resp.status = response.status_code
+        return resp
 
 # XXX: define what we mean by paranoid, and make sure it is.
 class CurlHTTPFetcher(HTTPFetcher):
